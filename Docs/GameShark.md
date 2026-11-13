@@ -17,7 +17,7 @@ to its flash are not written back to the firmware file; they are saved as an IPS
 
 ## 2. Sources
 
-The hardware model is based only on the following two sources.
+The hardware model is based only on the following sources.
 
 1. Static analysis of the firmware `gsv33.n64`, disassembled for this work.
    `shell.bin` and `trainer.bin` were analysed after LZARI decompression. Addresses in
@@ -26,6 +26,9 @@ The hardware model is based only on the following two sources.
 2. Measurements on a real cartridge, recorded in `gameshark-n64-analysis.md`
    (Nekokabu, 2026-11-03): reads past 0x20000 return zero during boot, the structure of
    the key code, booting with a 5101 key, and the WatchLo behaviour in Baku Bomberman 2.
+3. Console measurements of reads from unpopulated RDRAM with the test ROM
+   rdram_unmapped v1.1, recorded in `rdram-hw-report.md` (Nekokabu, 2026-11-13).
+   Used only for the change in section 4.4.
 
 RWeick's REF1329 and documents derived from it were not used.
 
@@ -120,7 +123,8 @@ switching something on the cartridge above) is not known.
 | `MemoryHandler/RomMemoryHandler.cpp` | Cartridge bus reads and writes go to the GameShark first |
 | `MemoryHandler/PeripheralInterfaceHandler.cpp` | PI DMA reads go to the GameShark first |
 | `MemoryHandler/SerialInterfaceHandler.cpp` | 0x04800014, which the boot loader polls instead of SI status, reads as 0 (no debugger break) |
-| `Mips/MemoryVirtualMem.h/.cpp` | Opcode fetch from the GameShark flash, write watch exception |
+| `Mips/MemoryVirtualMem.h/.cpp` | Opcode fetch from the GameShark flash, write watch exception, LW from unpopulated RDRAM reads 0 |
+| `Recompiler/x86/x86RecompilerOps.cpp` | Same LW rule for constant addresses |
 | `Mips/Register.cpp` | Writing WatchLo updates the watch point |
 | `N64System/N64System.h/.cpp` | Firmware detection, game ROM selection, key check, reset, GS button, CPU core selection, recent ROM entry |
 | `Notification.h`, UI / Android `Notification.h/.cpp` | Game ROM selection dialog |
@@ -172,7 +176,26 @@ switching something on the cartridge above) is not known.
 - Saved on the first flash read after a write, on a latch change, on reset and when
   emulation ends.
 
-### 4.4 Design decisions
+### 4.4 Key code dialog colour
+
+When the key code is changed, the firmware draws the "Are you sure you have this game?"
+box with the routine at 0x8021126C. The caller (0x80207028) passes 0x00280028 where the
+routine expects an index into a 12-byte table at 0x80227C18, so the colours are read
+from 0x82027DF8 (physical 0x02027DF8), an address with no
+RDRAM behind it. Project64 returned an address pattern (0x7DF87DF8 ...) for 32-bit
+loads there and the box came out yellow; on a console it is black. With zero returned
+the test environment draws the box black, matching the console. Byte, halfword and
+doubleword loads already returned zero in this range; 32-bit loads from the RDRAM
+address space beyond the installed RDRAM (up to 0x03EFFFFF) now do the same.
+
+This was confirmed on a console with the test ROM rdram_unmapped v1.1 (Nekokabu,
+2026-11-13, NTSC console with 8 MiB): loads of every width from the unpopulated RDRAM
+range return zero, as do cached reads and RSP DMA; writes there are ignored and there
+is no mirroring. In 0.2-1.6% of reads the console returned values that look like RDRAM
+device registers instead, at a rate that depends on bus activity; this is not
+reproduced.
+
+### 4.5 Design decisions
 
 - **The CPU core is forced to the interpreter while a GameShark is attached.** The
   firmware depends on the WatchLo write watch exception. The recompiler writes some
@@ -213,6 +236,7 @@ switching something on the cartridge above) is not known.
    - Pro Action Replay v3.20 firmware boots (only v3.30 was analysed).
 
 ## 6. Open points and limitations
+
 
 - Only v3.30 (09:54 Mar 27) was analysed. Pro Action Replay v3.20 has been seen to
   boot, but other versions were not analysed and may use a different register layout.

@@ -737,6 +737,13 @@ bool CMipsMemoryVM::LW_PhysicalAddress(uint32_t PAddr, uint32_t & Value)
         {
             Value = *(uint32_t *)(m_RDRAM + PAddr);
         }
+        else if (PAddr < 0x03F00000)
+        {
+            // RDRAM address space without RDRAM installed reads as zero, the same as the byte, halfword
+            // and doubleword loads. On a console the GameShark key code dialog box reads its colours
+            // from here (0x02027DF8, firmware bug) and comes out black
+            Value = 0;
+        }
         else if (PAddr >= 0x10000000 && PAddr < 0x20000000)
         {
             m_RomMemoryHandler.Read32(PAddr, Value);
